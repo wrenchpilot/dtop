@@ -143,6 +143,16 @@ impl AppState {
             return RenderAction::None;
         };
 
+        // Follow Logs reuses the existing log view flow instead of going through
+        // Docker action execution.
+        if action == ContainerAction::FollowLogs {
+            let container_key_clone = container_key.clone();
+
+            self.action_menu_state.select(None);
+
+            return self.show_log_view_for_container(&container_key_clone);
+        }
+
         // Handle Shell action specially - it needs to take over the terminal
         if action == ContainerAction::Shell {
             let container_key_clone = container_key.clone();

@@ -15,6 +15,11 @@ pub async fn execute_container_action(
 
     // Execute the action using DockerHost methods
     let result = match action {
+        ContainerAction::FollowLogs => {
+            // Follow Logs is handled in AppState by switching to LogView.
+            // This path should never be reached.
+            return;
+        }
         ContainerAction::Start => host.start_container(&container_key.container_id).await,
         ContainerAction::Stop => host.stop_container(&container_key.container_id).await,
         ContainerAction::Restart => host.restart_container(&container_key.container_id).await,

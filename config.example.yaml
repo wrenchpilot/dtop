@@ -15,8 +15,8 @@ hosts:
   - host: local
 
   # Host with optional Dozzle URL
-  # - host: ssh://root@146.190.3.114
-  #   dozzle: https://l.dozzle.dev/
+  # - host: ssh://user@example-host-1
+  #   dozzle: https://logs.example.com/
 
   # Host with filters (only show running containers named nginx)
   # - host: local
@@ -25,23 +25,45 @@ hosts:
   #     - name=nginx
 
   # Host with label filters (production environment only)
-  # - host: ssh://user@server1
-  #   dozzle: https://dozzle.server1.com/
+  # - host: ssh://user@example-host-2
+  #   dozzle: https://dozzle.example-host-2.example.com/
   #   filter:
   #     - label=environment=production
   #     - status=running
 
   # More examples:
-  # - host: ssh://user@server2:2222
-  #   dozzle: https://dozzle.server2.com/
+  # - host: ssh://user@example-host-3:2222
+  #   dozzle: https://dozzle.example-host-3.example.com/
   #   filter:
   #     - ancestor=ubuntu:24.04  # Only containers from Ubuntu 24.04 image
-  # - host: tcp://192.168.1.100:2375  # TCP connection (unencrypted)
+  # - host: tcp://example-host-4:2375  # TCP connection (unencrypted)
   #   filter:
   #     - health=healthy  # Only healthy containers
-  # - host: tls://192.168.1.100:2376  # TLS connection (encrypted, requires DOCKER_CERT_PATH)
+  # - host: tls://example-host-5:2376  # TLS connection (encrypted, requires DOCKER_CERT_PATH)
   #   filter:
   #     - network=bridge  # Only containers on bridge network
+
+# Optional named groups for selecting subsets of hosts with --group/-g
+# Selectors can be:
+# - an exact host alias: "example-node-1"
+# - an exact host spec: "ssh://example-node-1"
+# - a prefix pattern ending in '*': "example-group-a-*"
+#
+# If a group is not explicitly defined here, dtop also supports implicit prefix
+# matching against host aliases. For example, `--group example-group-a` will
+# match hosts like `ssh://example-group-a-node-1`, and `--group
+# example-group-b` will match `ssh://example-group-b-node-1`,
+# `ssh://example-group-b-node-2`, etc.
+#
+# groups:
+#   example-group-a:
+#     - example-group-a-*
+#   example-group-b:
+#     - example-group-b-*
+#   combined-group:
+#     - example-group-a-*
+#     - example-group-b-*
+
 # Icon style for the UI
 # Options: "unicode" (default, works everywhere) or "nerd" (requires Nerd Font)
 # icons: unicode

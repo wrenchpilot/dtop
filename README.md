@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/dtop-icon.svg" alt="dtop logo" width="150" height="150">  
+  <img src="docs/dtop-icon.svg" alt="dtop logo" width="150" height="150">
 </div>
 
 # 🖥️ dtop
@@ -36,6 +36,7 @@ A terminal based dashboard for Docker that monitors multiple hosts in real-time.
 - [ ] Configurable columns and saving preferences
 
 ## Installation
+
 `dtop` can be installed through multiple package managers or by downloading the binary directly.
 
 ### Homebrew
@@ -47,10 +48,10 @@ brew install --cask amir20/homebrew-dtop/dtop
 ```
 
 > [!NOTE]
-> Homebrew is recommended as `dtop` is in active development with frequent updates. Using Homebrew will automatically upgrade `dtop`. 
-
+> Homebrew is recommended as `dtop` is in active development with frequent updates. Using Homebrew will automatically upgrade `dtop`.
 
 ### Docker
+
 `dtop` is released as a docker image. You can pull it from Github.
 
 ```sh
@@ -108,6 +109,7 @@ dtop update
 ```
 
 This command will:
+
 - Check GitHub releases for the latest version
 - Download and install the update if a newer version is available
 - Automatically replace the current binary with the new version
@@ -132,59 +134,71 @@ Commands:
 Options:
   -H, --host <HOST>
           Docker host(s) to connect to. Can be specified multiple times.
-          
+
           Examples:
             --host local                    (Connect to local Docker daemon)
             --host ssh://user@host          (Connect via SSH)
             --host ssh://user@host:2222     (Connect via SSH with custom port)
             --host tcp://host:2375          (Connect via TCP to remote Docker daemon)
             --host tls://host:2376          (Connect via TLS)
-            --host local --host ssh://user@server1 --host tls://server2:2376  (Multiple hosts)
-          
+            --host local --host ssh://user@example-host-1 --host tls://example-host-2:2376  (Multiple hosts)
+
           For TLS connections, set DOCKER_CERT_PATH to a directory containing:
             key.pem, cert.pem, and ca.pem
-          
+
           If not specified, will use config file or default to "local"
+
+  -g, --group <GROUP>
+          Named host group(s) to connect to from the config file.
+
+          Examples:
+            --group example-group-a
+            --group example-group-b
+            --group example-group-a --group example-group-b
+
+          Groups are resolved from the config file's `groups:` section when present.
+          If a group is not explicitly defined, dtop falls back to matching host aliases
+          by prefix.
 
   -i, --icons <ICONS>
           Icon style to use for the UI
-          
+
           Options:
             unicode  - Standard Unicode icons (default, works everywhere)
             nerd     - Nerd Font icons (requires Nerd Font installed)
 
   -f, --filter <FILTER>
           Filter containers (can be specified multiple times)
-          
+
           Examples:
             --filter status=running
             --filter name=nginx
             --filter label=com.example.version=1.0
             --filter ancestor=ubuntu:24.04
-          
+
           Multiple filters of the same type use OR logic:
             --filter status=running --filter status=paused
-          
+
           Different filter types use AND logic:
             --filter status=running --filter name=nginx
-          
+
           Available filters:
             id, name, label, status, ancestor, before, since,
             volume, network, publish, expose, health, exited
-          
+
           Note: Some filters only work with container listing, not events.
           Warnings will be shown if a filter is incompatible with events.
 
   -a, --all
           Show all containers (default shows only running containers)
-          
+
           By default, dtop only shows running containers.
           Use this flag to show all containers including stopped, exited, and paused containers.
-          
+
           Note: This flag can only enable showing all containers, not disable it.
           If your config file has 'all: true', you'll need to edit the config file
           or press 'a' in the UI to toggle back to showing only running containers.
-          
+
           This is equivalent to pressing 'a' in the UI to toggle show all.
 
   -h, --help
@@ -212,14 +226,14 @@ Here's an example configuration:
 ```yaml
 # Monitor production servers with filters and Dozzle integration
 hosts:
-  - host: ssh://user@prod-server1
-    dozzle: https://dozzle.prod-server1.com/
+  - host: ssh://user@example-host-1
+    dozzle: https://dozzle.example-host-1.example.com/
     filter:
       - status=running
       - label=environment=production
 
-  - host: ssh://user@prod-server2
-    dozzle: https://dozzle.prod-server2.com/
+  - host: ssh://user@example-host-2
+    dozzle: https://dozzle.example-host-2.example.com/
     filter:
       - status=running
       - label=environment=production
@@ -227,6 +241,36 @@ hosts:
 # Use Nerd Font icons for better visuals
 icons: nerd
 ```
+
+**Host groups**
+
+You can also define named groups and select them with `--group`:
+
+```yaml
+hosts:
+  - host: ssh://example-group-a-node-1
+  - host: ssh://example-group-a-node-2
+  - host: ssh://example-group-b-node-1
+  - host: ssh://example-group-b-node-2
+
+groups:
+  example-group-a:
+    - example-group-a-*
+  example-group-b:
+    - example-group-b-*
+```
+
+Then run:
+
+```bash
+dtop --group example-group-a
+dtop --group example-group-b
+```
+
+If a group is not explicitly defined in the config file, `dtop` also supports
+implicit prefix matching against host aliases, so `--group example-group-a` and
+`--group example-group-b` work naturally with aliases like
+`ssh://example-group-a-node-1` and `ssh://example-group-b-node-1`.
 
 **Or monitor specific application stacks:**
 
@@ -324,7 +368,6 @@ dtop --host local --host tcp://host2:2375 --host ssh://user@host
 ## Related Projects & Inspirations
 
 I am a big fan of [ctop](https://github.com/bcicen/ctop). `ctop` inspired me to create Dozzle but in the browser. However, it seems like `ctop` is no longer maintained. I considered forking `ctop` but deploying with same name would be challenging. I created `dtop` for my personal use case. I often want to see all my containers at a glance across multiple hosts. `dtop` achieves that by supporting remote hosts via `ssh` or `tcp`. Additionally, since I use Dozzle, I integrated Dozzle into `dtop` to provide a seamless experience for monitoring container logs.
-
 
 ## Contributing
 

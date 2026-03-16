@@ -3,6 +3,42 @@ use crate::core::types::{ContainerKey, LogState, RenderAction, ViewState};
 use crate::docker::logs::{LogEntry, fetch_older_logs};
 
 impl AppState {
+    pub(super) fn show_log_view_for_container(
+        &mut self,
+        container_key: &ContainerKey,
+    ) -> RenderAction {
+        // Get container creation time for progress calculation
+        let container_created_at = self.containers.get(container_key).and_then(|c| c.created);
+
+        // Create new log state for this container
+        let mut new_log_state = LogState::new(container_key.clone(), container_created_at);
+
+        // Start streaming logs for this container
+        if let Some(host) = self.connected_hosts.get(&container_key.host_id) {
+            let host_clone = host.clone();
+            let container_id = container_key.container_id.clone();
+            let tx_clone = self.event_tx.clone();
+
+            let handle = tokio::spawn(async move {
+                use crate::docker::logs::stream_container_logs;
+                stream_container_logs(host_clone, container_id, tx_clone).await;
+            });
+
+            new_log_state.stream_handle = Some(handle);
+        }
+
+        // Set the log state
+        self.log_state = Some(new_log_state);
+
+        // Reset scroll state - start at bottom
+        self.is_at_bottom = true;
+
+        // Switch to log view
+        self.view_state = ViewState::LogView(container_key.clone());
+
+        RenderAction::Render // Force draw - view changed
+    }
+
     pub(super) fn handle_enter_pressed(&mut self) -> RenderAction {
         // Handle Enter based on current view state
         match self.view_state {
@@ -41,36 +77,8 @@ impl AppState {
             return RenderAction::None;
         };
 
-        // Get container creation time for progress calculation
-        let container_created_at = self.containers.get(container_key).and_then(|c| c.created);
-
-        // Create new log state for this container
-        let mut new_log_state = LogState::new(container_key.clone(), container_created_at);
-
-        // Start streaming logs for this container
-        if let Some(host) = self.connected_hosts.get(&container_key.host_id) {
-            let host_clone = host.clone();
-            let container_id = container_key.container_id.clone();
-            let tx_clone = self.event_tx.clone();
-
-            let handle = tokio::spawn(async move {
-                use crate::docker::logs::stream_container_logs;
-                stream_container_logs(host_clone, container_id, tx_clone).await;
-            });
-
-            new_log_state.stream_handle = Some(handle);
-        }
-
-        // Set the log state
-        self.log_state = Some(new_log_state);
-
-        // Reset scroll state - start at bottom
-        self.is_at_bottom = true;
-
-        // Switch to log view
-        self.view_state = ViewState::LogView(container_key.clone());
-
-        RenderAction::Render // Force draw - view changed
+        let container_key = container_key.clone();
+        self.show_log_view_for_container(&container_key)
     }
 
     pub(super) fn handle_exit_log_view(&mut self) -> RenderAction {

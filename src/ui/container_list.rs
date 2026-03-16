@@ -56,11 +56,12 @@ fn create_container_row<'a>(
 ) -> Row<'a> {
     // Check if container is running
     let is_running = container.state == ContainerState::Running;
+    let progress_bar_width = if show_host_column { 18 } else { 20 };
 
     // Only show stats for running containers
     let (cpu_bar, cpu_style) = if is_running {
         let display = if show_progress_bars {
-            create_progress_bar(container.stats.cpu, 20)
+            create_progress_bar(container.stats.cpu, progress_bar_width)
         } else {
             format!("{:5.1}%", container.stats.cpu)
         };
@@ -75,7 +76,7 @@ fn create_container_row<'a>(
                 container.stats.memory,
                 container.stats.memory_used_bytes,
                 container.stats.memory_limit_bytes,
-                20,
+                progress_bar_width,
             )
         } else {
             format!("{:5.1}%", container.stats.memory)
@@ -260,18 +261,19 @@ fn create_table<'a>(
     ];
 
     if show_host_column {
-        constraints.push(Constraint::Length(20)); // Host
+        let host_width = if show_progress_bars { 24 } else { 22 };
+        constraints.push(Constraint::Length(host_width)); // Host
     }
 
     // Adjust column widths based on whether progress bars are shown
     let cpu_width = if show_progress_bars {
-        28 // CPU progress bar (20 chars + " 100.0%")
+        if show_host_column { 26 } else { 28 } // CPU progress bar + percentage
     } else {
         7 // Just percentage (" 100.0%")
     };
 
     let mem_width = if show_progress_bars {
-        33 // Memory progress bar (20 chars + " 999M/999M" + padding)
+        if show_host_column { 29 } else { 33 } // Memory progress bar + "999M/999M"
     } else {
         7 // Just percentage (" 100.0%")
     };
@@ -281,7 +283,7 @@ fn create_table<'a>(
         Constraint::Length(mem_width), // Memory
         Constraint::Length(12),        // Network TX (1.23MB/s)
         Constraint::Length(12),        // Network RX (4.56MB/s)
-        Constraint::Length(15),        // Created
+        Constraint::Length(12),        // Created (e.g. "2 hours ago")
     ]);
 
     Table::new(rows, constraints)

@@ -222,6 +222,7 @@ pub enum ViewState {
 /// Available actions for containers
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContainerAction {
+    FollowLogs,
     Start,
     Stop,
     Restart,
@@ -233,6 +234,7 @@ impl ContainerAction {
     /// Returns the display name for this action
     pub fn display_name(self) -> &'static str {
         match self {
+            ContainerAction::FollowLogs => "Follow Logs",
             ContainerAction::Start => "Start",
             ContainerAction::Stop => "Stop",
             ContainerAction::Restart => "Restart",
@@ -245,14 +247,23 @@ impl ContainerAction {
     pub fn available_for_state(state: &ContainerState) -> Vec<ContainerAction> {
         match state {
             ContainerState::Running => vec![
+                ContainerAction::FollowLogs,
                 ContainerAction::Shell,
                 ContainerAction::Stop,
                 ContainerAction::Restart,
                 ContainerAction::Remove,
             ],
-            ContainerState::Paused => vec![ContainerAction::Stop, ContainerAction::Remove],
+            ContainerState::Paused => vec![
+                ContainerAction::FollowLogs,
+                ContainerAction::Stop,
+                ContainerAction::Remove,
+            ],
             ContainerState::Exited | ContainerState::Created | ContainerState::Dead => {
-                vec![ContainerAction::Start, ContainerAction::Remove]
+                vec![
+                    ContainerAction::FollowLogs,
+                    ContainerAction::Start,
+                    ContainerAction::Remove,
+                ]
             }
             ContainerState::Restarting | ContainerState::Removing => vec![],
             ContainerState::Unknown => vec![],

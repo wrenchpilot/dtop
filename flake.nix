@@ -24,7 +24,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        version = "0.6.14";
+        version = "0.6.14-wrenchpilot";
 
         # Binary release configuration
         platformMap = {

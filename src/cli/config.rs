@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
+use url::Url;
 
 /// Configuration for a single Docker host
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -25,6 +27,15 @@ pub struct Config {
     /// Docker host(s) to connect to
     #[serde(default)]
     pub hosts: Vec<HostConfig>,
+
+    /// Named host groups that can be selected with --group
+    ///
+    /// Each selector can be:
+    /// - an exact host alias (e.g. "example-node-1")
+    /// - an exact host spec (e.g. "ssh://example-node-1")
+    /// - a prefix pattern ending in '*' (e.g. "example-group-a-*")
+    #[serde(default)]
+    pub groups: BTreeMap<String, Vec<String>>,
 
     /// Icon style to use (unicode or nerd)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,38 +96,106 @@ impl Config {
         paths
     }
 
-    /// Merge config with command line arguments
-    /// CLI args take precedence over config file values (with exceptions noted below)
-    pub fn merge_with_cli_hosts(
-        mut self,
-        cli_hosts: Vec<String>,
-        cli_default: bool,
-        cli_filters: Vec<String>,
-        cli_all: bool,
-        cli_sort: Option<String>,
-    ) -> Self {
-        // Use CLI hosts if explicitly provided, OR if config file is empty
-        if !cli_default || self.hosts.is_empty() {
-            // Convert CLI strings to HostConfig structs
-            self.hosts = cli_hosts
-                .into_iter()
-                .map(|host| HostConfig {
-                    host,
-                    dozzle: None,
-                    filter: if cli_filters.is_empty() {
-                        None
-                    } else {
-                        Some(cli_filters.clone())
-                    },
+    /// Resolve named groups to a concrete, de-duplicated list of hosts.
+    ///
+    /// If a group is not explicitly defined in `groups`, dtop falls back to
+    /// implicit matching on host aliases using:
+    /// - the exact group name
+    /// - the group name as a prefix pattern with `-*`
+    ///
+    /// This allows `--group example-group-a` or `--group example-group-b` to
+    /// work naturally with host aliases such as
+    /// `ssh://example-group-a-node-1` and `ssh://example-group-b-node-1`.
+    pub fn resolve_groups(&self, group_names: &[String]) -> Result<Vec<HostConfig>, String> {
+        let mut resolved = Vec::new();
+        let mut seen_hosts = HashSet::new();
+        let mut missing_groups = Vec::new();
+
+        for group_name in group_names {
+            let selectors = self
+                .groups
+                .get(group_name)
+                .cloned()
+                .unwrap_or_else(|| vec![group_name.clone(), format!("{group_name}-*")]);
+
+            let matches: Vec<HostConfig> = self
+                .hosts
+                .iter()
+                .filter(|host_config| {
+                    selectors
+                        .iter()
+                        .any(|selector| Self::host_matches_selector(host_config, selector))
                 })
+                .cloned()
                 .collect();
-        } else if !cli_filters.is_empty() {
-            // Config file hosts are being used, but CLI filters override per-host filters
+
+            if matches.is_empty() {
+                missing_groups.push(group_name.clone());
+                continue;
+            }
+
+            for host_config in matches {
+                if seen_hosts.insert(host_config.host.clone()) {
+                    resolved.push(host_config);
+                }
+            }
+        }
+
+        if !missing_groups.is_empty() {
+            return Err(format!(
+                "No hosts matched group(s): {}",
+                missing_groups.join(", ")
+            ));
+        }
+
+        Ok(resolved)
+    }
+
+    fn host_matches_selector(host_config: &HostConfig, selector: &str) -> bool {
+        let alias = Self::host_alias(&host_config.host);
+        Self::selector_matches(&host_config.host, selector)
+            || Self::selector_matches(&alias, selector)
+    }
+
+    fn selector_matches(value: &str, selector: &str) -> bool {
+        if let Some(prefix) = selector.strip_suffix('*') {
+            value.starts_with(prefix)
+        } else {
+            value == selector
+        }
+    }
+
+    fn host_alias(host_spec: &str) -> String {
+        if host_spec == "local" {
+            return "local".to_string();
+        }
+
+        if let Ok(url) = Url::parse(host_spec) {
+            if let Some(host) = url.host_str() {
+                return host.to_string();
+            }
+        }
+
+        host_spec.to_string()
+    }
+
+    fn with_selected_hosts(
+        mut self,
+        selected_hosts: Vec<HostConfig>,
+        cli_filters: Vec<String>,
+    ) -> Self {
+        self.hosts = selected_hosts;
+
+        if !cli_filters.is_empty() {
             for host_config in &mut self.hosts {
                 host_config.filter = Some(cli_filters.clone());
             }
         }
 
+        self
+    }
+
+    fn apply_cli_overrides(&mut self, cli_all: bool, cli_sort: Option<String>) {
         // CLI 'all' flag can only enable showing all containers, not disable it
         // This matches docker ps -a behavior: it's a simple boolean flag
         // If config has all: true, users must edit config or use 'a' key in UI to toggle
@@ -130,6 +209,55 @@ impl Config {
             self.sort = cli_sort;
         }
         // When cli_sort is None, config value is preserved
+    }
+
+    /// Merge config with a selected subset of config-defined hosts.
+    pub fn merge_with_selected_hosts(
+        mut self,
+        selected_hosts: Vec<HostConfig>,
+        cli_filters: Vec<String>,
+        cli_all: bool,
+        cli_sort: Option<String>,
+    ) -> Self {
+        self = self.with_selected_hosts(selected_hosts, cli_filters);
+        self.apply_cli_overrides(cli_all, cli_sort);
+        self
+    }
+
+    /// Merge config with command line arguments
+    /// CLI args take precedence over config file values (with exceptions noted below)
+    pub fn merge_with_cli_hosts(
+        mut self,
+        cli_hosts: Vec<String>,
+        cli_default: bool,
+        cli_filters: Vec<String>,
+        cli_all: bool,
+        cli_sort: Option<String>,
+    ) -> Self {
+        // Use CLI hosts if explicitly provided, OR if config file is empty
+        if !cli_default || self.hosts.is_empty() {
+            // Convert CLI strings to HostConfig structs
+            let selected_hosts = cli_hosts
+                .into_iter()
+                .map(|host| HostConfig {
+                    host,
+                    dozzle: None,
+                    filter: if cli_filters.is_empty() {
+                        None
+                    } else {
+                        Some(cli_filters.clone())
+                    },
+                })
+                .collect();
+            self = self.with_selected_hosts(selected_hosts, vec![]);
+        } else if !cli_filters.is_empty() {
+            // Config file hosts are being used, but CLI filters override per-host filters
+            for host_config in &mut self.hosts {
+                host_config.filter = Some(cli_filters.clone());
+            }
+        }
+
+        self.apply_cli_overrides(cli_all, cli_sort);
 
         self
     }
@@ -149,34 +277,36 @@ mod tests {
     fn test_merge_with_cli_hosts_uses_cli_when_provided() {
         let config = Config {
             hosts: vec![HostConfig {
-                host: "ssh://user@server1".to_string(),
+                host: "ssh://user@example-host-1".to_string(),
                 dozzle: None,
                 filter: None,
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: None,
             sort: None,
         };
 
         let merged = config.merge_with_cli_hosts(
-            vec!["ssh://user@server2".to_string()],
+            vec!["ssh://user@example-host-2".to_string()],
             false,
             vec![],
             false,
             None,
         );
         assert_eq!(merged.hosts.len(), 1);
-        assert_eq!(merged.hosts[0].host, "ssh://user@server2");
+        assert_eq!(merged.hosts[0].host, "ssh://user@example-host-2");
     }
 
     #[test]
     fn test_merge_with_cli_hosts_uses_config_when_cli_is_default() {
         let config = Config {
             hosts: vec![HostConfig {
-                host: "ssh://user@server1".to_string(),
+                host: "ssh://user@example-host-1".to_string(),
                 dozzle: Some("https://dozzle.example.com".to_string()),
                 filter: None,
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: None,
             sort: None,
@@ -185,7 +315,7 @@ mod tests {
         let merged =
             config.merge_with_cli_hosts(vec!["local".to_string()], true, vec![], false, None);
         assert_eq!(merged.hosts.len(), 1);
-        assert_eq!(merged.hosts[0].host, "ssh://user@server1");
+        assert_eq!(merged.hosts[0].host, "ssh://user@example-host-1");
         // Config file's dozzle URL is preserved
         assert_eq!(
             merged.hosts[0].dozzle.as_deref(),
@@ -197,6 +327,7 @@ mod tests {
     fn test_merge_with_cli_hosts_defaults_to_local() {
         let config = Config {
             hosts: vec![],
+            groups: BTreeMap::new(),
             icons: None,
             all: None,
             sort: None,
@@ -213,14 +344,14 @@ mod tests {
         let yaml = r#"
 hosts:
   - host: local
-  - host: ssh://user@server1
-  - host: ssh://user@server2:2222
+  - host: ssh://user@example-host-1
+  - host: ssh://user@example-host-2:2222
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.hosts.len(), 3);
         assert_eq!(config.hosts[0].host, "local");
-        assert_eq!(config.hosts[1].host, "ssh://user@server1");
-        assert_eq!(config.hosts[2].host, "ssh://user@server2:2222");
+        assert_eq!(config.hosts[1].host, "ssh://user@example-host-1");
+        assert_eq!(config.hosts[2].host, "ssh://user@example-host-2:2222");
         assert_eq!(config.hosts[0].dozzle, None);
     }
 
@@ -228,17 +359,17 @@ hosts:
     fn test_yaml_deserialization_with_dozzle() {
         let yaml = r#"
 hosts:
-  - host: ssh://root@146.190.3.114
-    dozzle: https://l.dozzle.dev/
+  - host: ssh://user@example-host-1
+    dozzle: https://logs.example.com/
   - host: local
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.hosts.len(), 2);
-        assert_eq!(config.hosts[0].host, "ssh://root@146.190.3.114");
+        assert_eq!(config.hosts[0].host, "ssh://user@example-host-1");
         assert_eq!(config.hosts[1].host, "local");
         assert_eq!(
             config.hosts[0].dozzle.as_deref(),
-            Some("https://l.dozzle.dev/")
+            Some("https://logs.example.com/")
         );
         assert_eq!(config.hosts[1].dozzle, None);
     }
@@ -274,6 +405,7 @@ hosts:
                 dozzle: None,
                 filter: Some(vec!["status=running".to_string()]),
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: None,
             sort: None,
@@ -297,6 +429,7 @@ hosts:
                 dozzle: None,
                 filter: Some(vec!["status=running".to_string()]),
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: None,
             sort: None,
@@ -319,6 +452,7 @@ hosts:
                 dozzle: None,
                 filter: None,
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: Some(false), // Config says false
             sort: None,
@@ -337,6 +471,7 @@ hosts:
                 dozzle: None,
                 filter: None,
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: Some(true), // Config says true
             sort: None,
@@ -355,6 +490,7 @@ hosts:
                 dozzle: None,
                 filter: None,
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: None, // No config value
             sort: None,
@@ -373,6 +509,7 @@ hosts:
                 dozzle: None,
                 filter: None,
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: None,
             sort: Some("name".to_string()), // Config says name
@@ -396,6 +533,7 @@ hosts:
                 dozzle: None,
                 filter: None,
             }],
+            groups: BTreeMap::new(),
             icons: None,
             all: None,
             sort: Some("memory".to_string()), // Config says memory
@@ -416,5 +554,98 @@ sort: cpu
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.hosts.len(), 1);
         assert_eq!(config.sort, Some("cpu".to_string()));
+    }
+
+    #[test]
+    fn test_yaml_deserialization_with_groups() {
+        let yaml = r#"
+hosts:
+  - host: ssh://example-group-a-node-1
+groups:
+  example-group-a:
+    - example-group-a-*
+  example-group-a-admin:
+    - example-group-a-admin-*
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.groups["example-group-a"],
+            vec!["example-group-a-*".to_string()]
+        );
+        assert_eq!(
+            config.groups["example-group-a-admin"],
+            vec!["example-group-a-admin-*".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_resolve_groups_uses_implicit_prefix_matching() {
+        let config = Config {
+            hosts: vec![
+                HostConfig {
+                    host: "ssh://example-group-a-node-1".to_string(),
+                    dozzle: None,
+                    filter: None,
+                },
+                HostConfig {
+                    host: "ssh://example-group-a-node-2".to_string(),
+                    dozzle: None,
+                    filter: None,
+                },
+                HostConfig {
+                    host: "ssh://example-group-b-node-1".to_string(),
+                    dozzle: None,
+                    filter: None,
+                },
+            ],
+            groups: BTreeMap::new(),
+            icons: None,
+            all: None,
+            sort: None,
+        };
+
+        let resolved = config
+            .resolve_groups(&["example-group-a".to_string()])
+            .unwrap();
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].host, "ssh://example-group-a-node-1");
+        assert_eq!(resolved[1].host, "ssh://example-group-a-node-2");
+    }
+
+    #[test]
+    fn test_resolve_groups_uses_explicit_group_patterns() {
+        let config = Config {
+            hosts: vec![
+                HostConfig {
+                    host: "ssh://example-group-b-node-1".to_string(),
+                    dozzle: None,
+                    filter: None,
+                },
+                HostConfig {
+                    host: "ssh://example-group-b-node-2".to_string(),
+                    dozzle: None,
+                    filter: None,
+                },
+                HostConfig {
+                    host: "ssh://example-group-c-node-1".to_string(),
+                    dozzle: None,
+                    filter: None,
+                },
+            ],
+            groups: BTreeMap::from([(
+                "example-group-b".to_string(),
+                vec!["example-group-b-*".to_string()],
+            )]),
+            icons: None,
+            all: None,
+            sort: None,
+        };
+
+        let resolved = config
+            .resolve_groups(&["example-group-b".to_string()])
+            .unwrap();
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].host, "ssh://example-group-b-node-1");
+        assert_eq!(resolved[1].host, "ssh://example-group-b-node-2");
     }
 }

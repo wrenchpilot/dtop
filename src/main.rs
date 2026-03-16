@@ -68,14 +68,30 @@ struct Args {
     ///   --host ssh://user@host:2222     (Connect via SSH with custom port)
     ///   --host tcp://host:2375          (Connect via TCP to remote Docker daemon)
     ///   --host tls://host:2376          (Connect via TLS)
-    ///   --host local --host ssh://user@server1 --host tls://server2:2376  (Multiple hosts)
+    ///   --host local --host ssh://user@example-host-1 --host tls://example-host-2:2376  (Multiple hosts)
     ///
     /// For TLS connections, set DOCKER_CERT_PATH to a directory containing:
     ///   key.pem, cert.pem, and ca.pem
     ///
     /// If not specified, will use config file or default to "local"
-    #[arg(short = 'H', long, verbatim_doc_comment)]
+    #[arg(short = 'H', long, verbatim_doc_comment, conflicts_with = "group")]
     host: Vec<String>,
+
+    /// Named host group(s) to connect to from the config file.
+    /// Can be specified multiple times.
+    ///
+    /// Examples:
+    ///   --group example-group-a    (Match all example group A hosts)
+    ///   --group example-group-b    (Match all example group B hosts)
+    ///   --group example-group-a --group example-group-b
+    ///
+    /// Groups are resolved from the config file's `groups:` section when
+    /// present. If a group is not explicitly defined, dtop falls back to
+    /// matching host aliases by prefix, so names like `example-group-a` and
+    /// `example-group-b` work naturally with aliases such as
+    /// `ssh://example-group-a-node-1` and `ssh://example-group-b-node-1`.
+    #[arg(short = 'g', long, verbatim_doc_comment, conflicts_with = "host")]
+    group: Vec<String>,
 
     /// Icon style to use for the UI
     ///
@@ -167,10 +183,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::main]
 async fn run_async(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // Determine if CLI hosts were explicitly provided
-    let cli_provided = !args.host.is_empty();
+    let cli_hosts_provided = !args.host.is_empty();
+    let cli_groups_provided = !args.group.is_empty();
 
     // Load config file only if CLI hosts not provided
-    let (config, config_path) = if cli_provided {
+    let (config, config_path) = if cli_hosts_provided {
         // User explicitly provided --host, don't load config for hosts
         (Config::default(), None)
     } else {
@@ -179,11 +196,26 @@ async fn run_async(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Merge config with CLI args (CLI takes precedence)
-    let merged_config = if cli_provided {
+    let merged_config = if cli_hosts_provided {
         // User explicitly provided --host, use CLI args
         config.merge_with_cli_hosts(
             args.host.clone(),
             false,
+            args.filter.clone(),
+            args.all,
+            args.sort.clone(),
+        )
+    } else if cli_groups_provided {
+        if let Some(path) = config_path.as_ref() {
+            eprintln!("Loaded config from: {}", path.display());
+        }
+
+        let selected_hosts = config
+            .resolve_groups(&args.group)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+        config.merge_with_selected_hosts(
+            selected_hosts,
             args.filter.clone(),
             args.all,
             args.sort.clone(),

@@ -101,6 +101,7 @@ impl Icons {
     pub fn action(&self, action: ContainerAction) -> &'static str {
         match self.style {
             IconStyle::Unicode => match action {
+                ContainerAction::FollowLogs => "≡",
                 ContainerAction::Start => "▶",
                 ContainerAction::Stop => "■",
                 ContainerAction::Restart => "↻",
@@ -108,11 +109,12 @@ impl Icons {
                 ContainerAction::Shell => ">_",
             },
             IconStyle::Nerd => match action {
-                ContainerAction::Start => "\u{f04b}",   // nf-fa-play
-                ContainerAction::Stop => "\u{f04d}",    // nf-fa-stop
-                ContainerAction::Restart => "\u{f01e}", // nf-fa-refresh
-                ContainerAction::Remove => "\u{f1f8}",  // nf-fa-trash
-                ContainerAction::Shell => "\u{f120}",   // nf-fa-terminal
+                ContainerAction::FollowLogs => "\u{f03d}", // nf-fa-list_alt
+                ContainerAction::Start => "\u{f04b}",      // nf-fa-play
+                ContainerAction::Stop => "\u{f04d}",       // nf-fa-stop
+                ContainerAction::Restart => "\u{f01e}",    // nf-fa-refresh
+                ContainerAction::Remove => "\u{f1f8}",     // nf-fa-trash
+                ContainerAction::Shell => "\u{f120}",      // nf-fa-terminal
             },
         }
     }
