@@ -121,7 +121,7 @@ This command will:
 
 By default, `dtop` will connect to the local Docker daemon using `/var/run/docker.sock`. `DOCKER_HOST` is also supported to connect to other hosts.
 
-```
+```bash
 > dtop --help
 A terminal-based Docker container monitoring tool with real-time CPU and memory metrics
 
@@ -141,7 +141,7 @@ Options:
             --host ssh://user@host:2222     (Connect via SSH with custom port)
             --host tcp://host:2375          (Connect via TCP to remote Docker daemon)
             --host tls://host:2376          (Connect via TLS)
-            --host local --host ssh://user@example-host-1 --host tls://example-host-2:2376  (Multiple hosts)
+            --host local --host ssh://user@server1 --host tls://server2:2376  (Multiple hosts)
 
           For TLS connections, set DOCKER_CERT_PATH to a directory containing:
             key.pem, cert.pem, and ca.pem
@@ -226,14 +226,14 @@ Here's an example configuration:
 ```yaml
 # Monitor production servers with filters and Dozzle integration
 hosts:
-  - host: ssh://user@example-host-1
-    dozzle: https://dozzle.example-host-1.example.com/
+  - host: ssh://user@prod-server1
+    dozzle: https://dozzle.prod-server1.com/
     filter:
       - status=running
       - label=environment=production
 
-  - host: ssh://user@example-host-2
-    dozzle: https://dozzle.example-host-2.example.com/
+  - host: ssh://user@prod-server2
+    dozzle: https://dozzle.prod-server2.com/
     filter:
       - status=running
       - label=environment=production
@@ -242,7 +242,7 @@ hosts:
 icons: nerd
 ```
 
-**Host groups**
+## Host Groups
 
 You can also define named groups and select them with `--group`:
 
